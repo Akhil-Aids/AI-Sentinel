@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at 20% 20%, #0e1c2f 0%, #07121f 55%, #040b15 100%);
+}
+
+.login-bg {
+  background:
+    radial-gradient(circle at 15% 10%, rgba(0, 212, 166, 0.18), transparent 35%),
+    radial-gradient(circle at 85% 90%, rgba(255, 77, 109, 0.2), transparent 35%),
+    linear-gradient(140deg, #030913 0%, #09192b 55%, #07101f 100%);
+}
+
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+.panel {
+  @apply bg-panel/80 backdrop-blur border border-slate-700 rounded-xl p-4;
+}
+
+.title {
+  @apply text-lg font-semibold;
+}
+
+.label {
+  @apply text-slate-300 text-sm;
+}
+
+.value {
+  @apply text-3xl font-bold mt-2;
+}
+
+.bar {
+  @apply w-full rounded-t bg-accent transition-all duration-500;
+}
+
+.input {
+  @apply w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm;
+}
+
+.btn {
+  @apply bg-accent text-slate-900 px-3 py-2 rounded-lg text-sm font-semibold hover:brightness-110;
+}

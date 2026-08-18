@@ -1,0 +1,33 @@
+services:
+  ai-sentinel:
+    build: .
+    container_name: ai-sentinel
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - SENTINEL_ENV=production
+      - SENTINEL_AUTH_SECRET=${SENTINEL_AUTH_SECRET:?Set SENTINEL_AUTH_SECRET in .env or the environment}
+      - SENTINEL_ADMIN_PASSWORD=${SENTINEL_ADMIN_PASSWORD:-}
+      - SENTINEL_AGENT_KEY=${SENTINEL_AGENT_KEY:-}
+      - SENTINEL_DB_PATH=/app/data/sentinel.db
+      - SENTINEL_RETENTION_DAYS=${SENTINEL_RETENTION_DAYS:-30}
+      - SENTINEL_WORKERS=${SENTINEL_WORKERS:-2}
+      - SENTINEL_ML_ENABLED=${SENTINEL_ML_ENABLED:-true}
+      - SENTINEL_PHISHING_ENABLED=${SENTINEL_PHISHING_ENABLED:-true}
+      - SENTINEL_TI_ENABLED=${SENTINEL_TI_ENABLED:-false}
+      - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY:-}
+      - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+      - SENTINEL_RESPONSE_DRY_RUN=${SENTINEL_RESPONSE_DRY_RUN:-true}
+      - SENTINEL_DEMO_MODE=${SENTINEL_DEMO_MODE:-false}
+    volumes:
+      - sentinel-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  sentinel-data:

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Env
+.env
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data (SQLite, trained models, bootstrap secrets)
+data/
+backend/models/
+backend/bootstrap_admin.txt
+backend/app/bootstrap_admin.txt
+_archive/
