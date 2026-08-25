@@ -62,7 +62,8 @@ def _rule_port_scan(ev: dict, cfg: dict) -> bool:
     if not src:
         return False
     ports = W.count_events_any(["net.connection", "net.connection_failed"], cfg.get("window_minutes", 5), "source_ip", src)
-    return ports >= cfg.get("min_connections", 15)
+    unique_ports = W.distinct_values_any(["net.connection", "net.connection_failed"], cfg.get("window_minutes", 5), "dest_port", "source_ip", src)
+    return ports >= cfg.get("min_connections", 15) or len(unique_ports) >= cfg.get("min_unique_ports", 10)
 
 
 def _rule_sql_injection(ev: dict, cfg: dict) -> bool:
@@ -434,18 +435,22 @@ class RuleEngine:
         return detections
 
     def _build_detection(self, rule: dict, ev: dict) -> dict:
+        severity = rule.get("severity", "medium")
+        severity_confidence = {"critical": 0.95, "high": 0.85, "medium": 0.70, "low": 0.50}
         return {
             "event_id": ev.get("event_id"),
             "rule_id": rule["rule_id"],
             "rule_name": rule["name"],
             "description": rule["description"],
             "category": rule["category"],
-            "severity": rule["severity"],
+            "severity": severity,
+            "confidence": severity_confidence.get(severity, 0.70),
             "mitre": rule.get("mitre", []),
             "source_ip": ev.get("source_ip", ""),
             "dest_ip": ev.get("dest_ip", ""),
             "host": ev.get("host", ""),
             "username": ev.get("username", ""),
+            "rule_version": rule.get("version", 1),
         }
 
 

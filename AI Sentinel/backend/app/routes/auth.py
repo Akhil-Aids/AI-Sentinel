@@ -143,3 +143,15 @@ def update_user(user_id: int, body: UserUpdateRequest, request: Request,
     db.log_audit(actor=payload["sub"], role=payload["role"], action="auth.update_user",
                  target=existing["username"], ip=client_ip(request), detail={k: v for k, v in fields.items() if k != "password_hash"})
     return {"status": "ok"}
+
+
+@router.post("/logout")
+def logout(request: Request, payload: dict = Depends(current_user)) -> dict:
+    """Invalidate the current session. Server-side token revocation."""
+    token = request.headers.get("authorization", "").replace("Bearer ", "")
+    if token:
+        from app.core.deps import _revoked_tokens
+        _revoked_tokens.add(token)
+    db.log_audit(actor=payload["sub"], role=payload.get("role", ""), action="auth.logout",
+                 result="SUCCESS", ip=client_ip(request))
+    return {"status": "ok"}

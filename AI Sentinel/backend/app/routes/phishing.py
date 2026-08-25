@@ -2,19 +2,19 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app import db
 from app.core.deps import client_ip, require_privilege_at_least
-from app.phishing.analyzer import analyze_and_store
+from app.phishing.analyzer import analyze_and_store, validate_url_format
 from app.pipeline import pipeline
 
 router = APIRouter()
 
 
 class PhishingRequest(BaseModel):
-    url: str = Field(min_length=4, max_length=2048)
+    url: str = Field(min_length=2, max_length=2048)
 
 
 @router.post("/analyze")
@@ -22,6 +22,9 @@ def analyze_url(body: PhishingRequest, request: Request,
                 _payload: dict = Depends(require_privilege_at_least("SOC_ANALYST"))) -> dict:
     """Analyze a URL and, on a MALICIOUS verdict, feed the detection pipeline so
     the URL becomes a real alert + incident (with MITRE T1566 evidence)."""
+    validation_error = validate_url_format(body.url)
+    if validation_error:
+        raise HTTPException(status_code=422, detail=validation_error)
     result = analyze_and_store(body.url, scanner_ip=client_ip(request))
     db.log_audit(actor=_payload["sub"], role=_payload["role"], action="phishing.analyze",
                  result="SUCCESS", ip=client_ip(request),

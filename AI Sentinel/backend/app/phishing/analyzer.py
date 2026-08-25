@@ -15,6 +15,50 @@ from urllib.parse import parse_qs, unquote, urlparse
 from app import db, threat_intel
 from app.core.config import settings
 
+_URL_RE = re.compile(
+    r"^https?://"                 # scheme
+    r"[a-zA-Z0-9]"               # must start with alphanumeric
+    r"[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=%-]*$"  # valid URL chars
+)
+_DOMAIN_RE = re.compile(
+    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
+    r"[a-zA-Z]{2,}$"
+)
+
+
+def validate_url_format(raw: str) -> str | None:
+    """Return None if valid, or an error message if invalid."""
+    url = raw.strip()
+    if not url:
+        return "Empty input. Please enter a URL."
+
+    has_scheme = url.startswith("http://") or url.startswith("https://")
+
+    if has_scheme:
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            return "Invalid URL format. Please enter a valid URL."
+        if not _DOMAIN_RE.match(parsed.hostname) and not _is_ip_literal(parsed.hostname):
+            return "Invalid URL format. Please enter a valid URL."
+        return None
+
+    # No scheme: treat as domain-only input (e.g., "example.com")
+    if " " in url and not url.startswith("http"):
+        return "Invalid URL format. Please enter a valid URL."
+    candidate = url.split("/")[0].split("?")[0].split("#")[0]
+    if ("." in candidate) and (_DOMAIN_RE.match(candidate) or _is_ip_literal(candidate)):
+        return None
+
+    return "Invalid URL format. Please enter a valid URL."
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
 KNOWN_BRANDS = [
     "paypal", "apple", "icloud", "microsoft", "office", "outlook", "amazon",
     "google", "gmail", "facebook", "netflix", "linkedin", "dropbox", "github",
@@ -85,6 +129,16 @@ def analyze(url: str) -> dict:
         return {"verdict": "UNKNOWN", "risk_score": 0, "reasons": ["Phishing analysis disabled"], "redirects": []}
 
     url = url.strip()
+
+    # Strict format validation — reject non-URLs
+    validation_error = validate_url_format(url)
+    if validation_error:
+        return {"verdict": "ERROR", "risk_score": 0, "reasons": [validation_error], "redirects": []}
+
+    # Ensure URL has a scheme for parsing
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
     reasons: list[dict] = []
     score = 0
 
@@ -93,7 +147,7 @@ def analyze(url: str) -> dict:
     port = parsed.port
 
     if not host:
-        return {"verdict": "SAFE", "risk_score": 0, "reasons": ["No hostname present"], "redirects": []}
+        return {"verdict": "ERROR", "risk_score": 0, "reasons": ["Unable to extract hostname from URL"], "redirects": []}
 
     # 1. Non-standard port
     if port and port not in (80, 443):

@@ -1,7 +1,16 @@
 """API integration tests (FastAPI TestClient)."""
 import time
+from datetime import datetime, timedelta, timezone
 
 from conftest import TEST_PASSWORD, TEST_USERNAME
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _ts(minutes_ago: int = 0) -> str:
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
 
 
 def _wait_for(client, headers, path, predicate, timeout=15.0):
@@ -57,15 +66,16 @@ def test_overview_shape(client, admin_headers):
 
 
 def test_events_ingest_and_list(client, admin_headers):
-    now = "2026-08-16T12:00:00+00:00"
+    import time
     payload = {"events": [
-        {"ts": now, "event_type": "auth.failed_login", "source_ip": "203.0.113.44",
+        {"ts": _now_iso(), "event_type": "auth.failed_login", "source_ip": "203.0.113.44",
          "username": "bob", "details": {"reason": "bad password"}},
     ]}
     res = client.post("/api/events/ingest", json=payload, headers=admin_headers)
     assert res.status_code == 200
     assert res.json()["accepted"] == 1
 
+    time.sleep(1)
     res = client.get("/api/events/?event_type=auth.failed_login", headers=admin_headers)
     assert res.status_code == 200
     items = res.json()["items"]
@@ -98,7 +108,7 @@ def test_chatbot_grounded(client, admin_headers):
 def test_incident_workflow_via_api(client, admin_headers):
     # Fire a brute-force campaign through the ingest API and expect an incident.
     events = [
-        {"ts": f"2026-08-16T13:0{i}:00+00:00", "event_type": "auth.failed_login",
+        {"ts": _ts(i), "event_type": "auth.failed_login",
          "source_ip": "203.0.113.99", "username": f"u{i % 2}"}
         for i in range(12)
     ]

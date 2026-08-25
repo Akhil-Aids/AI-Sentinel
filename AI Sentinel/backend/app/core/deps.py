@@ -10,6 +10,10 @@ from app.core.security import bearer_scheme
 
 _ROLE_LEVEL = {role: i for i, role in enumerate(ROLES)}  # ADMIN=0 highest
 
+# Token revocation set (in-memory; survives for the lifetime of the process).
+# Tokens are short-lived (TTL-based), so this is bounded.
+_revoked_tokens: set[str] = set()
+
 # Short-lived cache: user existence/active flag checked against the DB so
 # disabled/deleted users lose access within ~5s (token revocation).
 _user_cache: dict[str, tuple[float, bool]] = {}
@@ -30,6 +34,9 @@ def _user_is_active(username: str) -> bool:
 
 def current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)) -> dict:
     payload = verify_token(credentials)
+    raw_token = credentials.credentials if credentials else ""
+    if raw_token and raw_token in _revoked_tokens:
+        raise HTTPException(status_code=401, detail="Token has been revoked")
     if not _user_is_active(payload.get("sub", "")):
         raise HTTPException(status_code=401, detail="Account disabled or removed")
     return payload

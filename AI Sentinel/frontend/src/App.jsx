@@ -6,6 +6,7 @@ import EventsPage from './components/EventsPage';
 import AlertsPage from './components/AlertsPage';
 import IncidentsPage from './components/IncidentsPage';
 import IncidentDetailPage from './components/IncidentDetailPage';
+import HostsPage from './components/HostsPage';
 import RulesPage from './components/RulesPage';
 import PhishingPage from './components/PhishingPage';
 import NetworkPage from './components/NetworkPage';
@@ -21,6 +22,7 @@ export default function App() {
       <Route path="/alerts" element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
       <Route path="/incidents" element={<ProtectedRoute><IncidentsPage /></ProtectedRoute>} />
       <Route path="/incidents/:id" element={<ProtectedRoute><IncidentDetailPage /></ProtectedRoute>} />
+      <Route path="/hosts" element={<ProtectedRoute><HostsPage /></ProtectedRoute>} />
       <Route path="/rules" element={<ProtectedRoute><RulesPage /></ProtectedRoute>} />
       <Route path="/phishing" element={<ProtectedRoute><PhishingPage /></ProtectedRoute>} />
       <Route path="/network" element={<ProtectedRoute><NetworkPage /></ProtectedRoute>} />

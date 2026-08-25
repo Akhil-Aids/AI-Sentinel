@@ -182,6 +182,16 @@ export async function resetRules() {
   return request('/rules/reset', { method: 'POST' });
 }
 
+export async function listHosts(params = {}) {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, v); });
+  return request(`/hosts/?${q.toString()}`);
+}
+
+export async function getHost(hostname) {
+  return request(`/hosts/${encodeURIComponent(hostname)}`);
+}
+
 export async function listAgents() {
   return request('/agents/');
 }
@@ -224,9 +234,4 @@ export async function askChatbot(message) {
 
 export async function publicHealth() {
   return request('/health', {}, false);
-}
-
-export function wsUrl() {
-  const base = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-  return `${base}${window.location.host}/ws/events?token=${encodeURIComponent(getToken())}`;
 }

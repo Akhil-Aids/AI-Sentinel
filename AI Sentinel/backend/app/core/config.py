@@ -99,6 +99,11 @@ class Settings:
 
     # --- Simulated / demo mode -------------------------------------------------
     # Explicitly off unless enabled. Demo mode never feeds the production store.
+    # --- Backup protection ----------------------------------------------------
+    BACKUP_TARGETS = [p.strip() for p in os.getenv("SENTINEL_BACKUP_TARGETS", "").split(";") if p.strip()]
+
+    # --- Simulated / demo mode -------------------------------------------------
+    # Explicitly off unless enabled. Demo mode never feeds the production store.
     DEMO_MODE = _env_bool("SENTINEL_DEMO_MODE", False)
 
 

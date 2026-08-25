@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
 CREATE INDEX IF NOT EXISTS idx_alerts_group ON alerts(group_key);
+CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
 
 CREATE TABLE IF NOT EXISTS incidents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -317,6 +318,17 @@ CREATE TABLE IF NOT EXISTS server_stats (
 );
 
 CREATE INDEX IF NOT EXISTS idx_server_stats_host_ts ON server_stats(hostname, ts DESC);
+
+CREATE TABLE IF NOT EXISTS backup_protection (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id TEXT NOT NULL UNIQUE,
+    incident_id TEXT NOT NULL,
+    affected_files TEXT DEFAULT '[]',
+    backup_targets TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backup_protection_incident ON backup_protection(incident_id);
 """
 
 
@@ -333,6 +345,7 @@ _SCHEMA_COLUMNS = {
         ("alert_created_at", "TEXT"),
         ("incident_created_at", "TEXT"),
         ("dashboard_delivered_at", "TEXT"),
+        ("raw_evidence_hash", "TEXT DEFAULT ''"),
     ],
     "servers": [
         ("environment", "TEXT DEFAULT ''"),
@@ -375,7 +388,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     for key in ("details", "raw", "mitre", "timeline", "event_ids", "evidence",
                 "detection_rules", "recommended_actions", "actions_taken",
-                "reasons", "redirects", "params", "metrics", "detail", "tags", "config", "snapshot"):
+                "reasons", "redirects", "params", "metrics", "detail", "tags", "config", "snapshot",
+                "backup_targets", "affected_files"):
         if key in d:
             d[key] = _loads(d[key], [] if key not in ("details", "raw", "params", "metrics", "detail", "config", "tags", "snapshot") else {})
     return d
@@ -1028,6 +1042,38 @@ def apply_retention(days: int) -> dict:
 def stats_counts() -> dict:
     out = {}
     for table in ("users", "servers", "events", "alerts", "incidents", "audit_logs",
-                  "phishing_scans", "response_actions", "threat_intel"):
+                  "phishing_scans", "response_actions", "threat_intel", "backup_protection"):
         out[table] = _fetch_one(f"SELECT COUNT(*) AS c FROM {table}")["c"]
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Backup protection (defensive snapshots)
+# --------------------------------------------------------------------------- #
+def save_backup_protection(snapshot: dict) -> dict:
+    s = dict(snapshot)
+    s["snapshot_id"] = s.get("snapshot_id") or new_id("bksnap")
+    s["created_at"] = s.get("created_at") or _now()
+    with db() as conn:
+        conn.execute(
+            """INSERT INTO backup_protection(snapshot_id, incident_id, affected_files, backup_targets, created_at)
+               VALUES(?,?,?,?,?)""",
+            (s["snapshot_id"], s.get("incident_id", ""),
+             _json(s.get("affected_files", [])), _json(s.get("backup_targets", [])),
+             s["created_at"]),
+        )
+    return _fetch_one("SELECT * FROM backup_protection WHERE snapshot_id = ?", (s["snapshot_id"],))
+
+
+def get_backup_protection(incident_id: str) -> list[dict]:
+    return _fetch_all(
+        "SELECT * FROM backup_protection WHERE incident_id = ? ORDER BY created_at DESC",
+        (incident_id,),
+    )
+
+
+def list_backup_protection_all(limit: int = 100) -> list[dict]:
+    return _fetch_all(
+        "SELECT * FROM backup_protection ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    )

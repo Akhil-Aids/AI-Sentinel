@@ -30,8 +30,9 @@ export function useLiveSocket({ onMessage, enabled = true } = {}) {
     const connect = () => {
       if (disposed) return;
       const token = localStorage.getItem('ai_sentinel_token');
-      const url = `${window.location.protocol === 'https:' ? 'wss://' : 'ws://'}${window.location.host}/ws/events?token=${encodeURIComponent(token || '')}`;
-      sock = new WebSocket(url);
+      const base = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      const url = `${base}${window.location.host}/ws/events`;
+      sock = new WebSocket(url, token ? [`sentinel.${token}`] : []);
       sock.onopen = () => {
         if (disposed) return;
         attempts = 0;

@@ -1,7 +1,8 @@
-"""Realtime WebSocket tests: subprotocol/query-token auth, bad-token rejection,
+"""Realtime WebSocket tests: subprotocol auth, bad-token rejection,
 and live delivery of a detection to a connected dashboard client."""
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 from conftest import TEST_PASSWORD, TEST_USERNAME
 
@@ -35,23 +36,36 @@ def _token(client):
 def test_ws_rejects_bad_token(client):
     from starlette.websockets import WebSocketDisconnect
     try:
-        with client.websocket_connect("/ws/events?token=garbage.token.here") as ws:
+        with client.websocket_connect("/ws/events", subprotocols=["sentinel.garbage.token.here"]) as ws:
             _recv_json(ws, timeout=5.0)
         raise AssertionError("expected the server to close the connection")
     except WebSocketDisconnect as exc:
         assert exc.code == 4401
 
 
+def test_ws_rejects_url_token(client):
+    """Ensure the legacy ?token= query parameter is no longer accepted."""
+    from starlette.websockets import WebSocketDisconnect
+    token = _token(client)
+    try:
+        with client.websocket_connect(f"/ws/events?token={token}") as ws:
+            _recv_json(ws, timeout=5.0)
+        raise AssertionError("expected the server to close the connection for URL token")
+    except WebSocketDisconnect as exc:
+        assert exc.code == 4401
+
+
 def test_ws_hello_and_detection_push(client):
     token = _token(client)
-    with client.websocket_connect(f"/ws/events?token={token}") as ws:
+    with client.websocket_connect("/ws/events", subprotocols=[f"sentinel.{token}"]) as ws:
         hello = _recv_json(ws)
         assert hello["type"] == "hello"
         assert hello["payload"]["user"]
 
         # Fire a brute-force campaign; the dashboard client should receive it live.
         events = [
-            {"ts": f"2026-08-16T14:0{i}:00+00:00", "event_type": "auth.failed_login",
+            {"ts": (datetime.now(timezone.utc) - timedelta(minutes=i)).isoformat(),
+             "event_type": "auth.failed_login",
              "source_ip": "203.0.113.77", "username": f"u{i % 2}"}
             for i in range(12)
         ]

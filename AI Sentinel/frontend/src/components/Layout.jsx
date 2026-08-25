@@ -5,6 +5,7 @@ const NAV = [
   { to: '/events', label: 'Live Events', icon: 'M13 5l7 7-7 7M5 5l7 7-7 7' },
   { to: '/alerts', label: 'Alerts', icon: 'M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
   { to: '/incidents', label: 'Incidents', icon: 'M9 12h6m-6 4h6M9 8h6M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z' },
+  { to: '/hosts', label: 'Hosts', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4' },
   { to: '/network', label: 'Network', icon: 'M8 9l-5 5 5 5M16 9l5 5-5 5M13 4l-2 16' },
   { to: '/rules', label: 'Detection Rules', icon: 'M12 3v3m6.4-1.4l-2.1 2.1M21 12h-3m1.4 6.4l-2.1-2.1M12 21v-3m-6.4 1.4l2.1-2.1M3 12h3m-1.4-6.4l2.1 2.1M9 16a4 4 0 116 0' },
   { to: '/phishing', label: 'Phishing Analysis', icon: 'M13 6a2 2 0 11-4 0 2 2 0 014 0zM8 10h8l-1 10H9L8 10z' },

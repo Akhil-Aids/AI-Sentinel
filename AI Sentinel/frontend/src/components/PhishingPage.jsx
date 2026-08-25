@@ -8,7 +8,25 @@ const VERDICT_STYLES = {
   SUSPICIOUS: 'bg-amber-500/15 text-amber-300 border-amber-400/40',
   SAFE: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/40',
   ERROR: 'bg-slate-500/15 text-slate-300 border-slate-400/40',
+  UNKNOWN: 'bg-slate-500/15 text-slate-300 border-slate-400/40',
 };
+
+function validateUrl(value) {
+  const v = value.trim();
+  if (!v) return 'Please enter a URL.';
+  const hasScheme = /^https?:\/\//i.test(v);
+  if (hasScheme) {
+    try {
+      const parsed = new URL(v);
+      if (!parsed.hostname || !parsed.hostname.includes('.')) return 'Invalid URL format. Please enter a valid URL.';
+      return null;
+    } catch { return 'Invalid URL format. Please enter a valid URL.'; }
+  }
+  if (/\s/.test(v) && !v.startsWith('http')) return 'Invalid URL format. Please enter a valid URL.';
+  const candidate = v.split('/')[0].split('?')[0].split('#')[0];
+  if (candidate.includes('.') && /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/.test(candidate)) return null;
+  return 'Invalid URL format. Please enter a valid URL.';
+}
 
 export default function PhishingPage() {
   const [url, setUrl] = useState('');
@@ -29,6 +47,12 @@ export default function PhishingPage() {
   const analyze = async (e) => {
     e.preventDefault();
     if (!url.trim()) return;
+    const validationError = validateUrl(url);
+    if (validationError) {
+      setMsg(validationError);
+      setResult(null);
+      return;
+    }
     setBusy(true);
     setMsg('');
     try {

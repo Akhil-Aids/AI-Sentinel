@@ -7,6 +7,7 @@ services:
       - "8000:8000"
     environment:
       - SENTINEL_ENV=production
+      - SENTINEL_ENVIRONMENT=production
       - SENTINEL_AUTH_SECRET=${SENTINEL_AUTH_SECRET:?Set SENTINEL_AUTH_SECRET in .env or the environment}
       - SENTINEL_ADMIN_PASSWORD=${SENTINEL_ADMIN_PASSWORD:-}
       - SENTINEL_AGENT_KEY=${SENTINEL_AGENT_KEY:-}

@@ -328,9 +328,10 @@ class AnomalyDetector:
         return {
             "enabled": self.enabled(),
             "model_loaded": self._model is not None,
-            "version": self._version or self._baseline.get("version", 0),
+            "model_version": str(self._version or self._baseline.get("version", 0)),
             "trained_samples": int(self._baseline.get("samples", 0)),
             "trained_at": self._baseline.get("trained_at", ""),
+            "feature_schema": FEATURE_NAMES,
             "contamination": settings.ML_CONTAMINATION,
             "metrics": (state or {}).get("metrics", {}),
             "drift": self.drift_score(),

@@ -50,3 +50,18 @@ def distinct_values(event_type: str, since_minutes: int, field: str,
         tuple(params),
     )
     return [r["v"] for r in rows]
+
+
+def distinct_values_any(event_types: list[str], since_minutes: int, field: str,
+                        key_field: Optional[str] = None, key_value: Optional[str] = None) -> list[str]:
+    placeholders = ",".join("?" for _ in event_types)
+    clauses = [f"event_type IN ({placeholders})", "ts >= ?"]
+    params = list(event_types) + [window_start(since_minutes)]
+    if key_field and key_value:
+        clauses.append(f"{key_field} = ?")
+        params.append(key_value)
+    rows = db._fetch_all(
+        f"SELECT DISTINCT {field} AS v FROM events WHERE {' AND '.join(clauses)} AND {field} != ''",
+        tuple(params),
+    )
+    return [r["v"] for r in rows]

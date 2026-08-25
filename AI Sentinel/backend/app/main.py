@@ -1,19 +1,41 @@
 """AI Sentinel API entrypoint."""
 import asyncio
 import secrets
+import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import db
 from app.core.config import WORKSPACE_ROOT, settings, validate_settings
+from app.core.logging import RequestFilter, setup_logging
 from app.core.security import hash_password, decode_token
 from app.pipeline import pipeline
 from app.services.ws_manager import ws_manager
 from app.telemetry.collector import run_collector_loop
 
-app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION)
+@asynccontextmanager
+async def lifespan(app):
+    setup_logging(level="DEBUG" if settings.DEBUG else "INFO")
+    validate_settings()
+    db.init_schema()
+    bootstrap_admin()
+    pipeline.start()
+    asyncio.create_task(run_collector_loop())
+    asyncio.create_task(_retention_loop())
+    asyncio.create_task(_ml_retrain_loop())
+    print(f"{settings.APP_NAME} v{settings.APP_VERSION} started "
+          f"(env={settings.ENV}, storage={settings.DB_PATH}, demo_mode={settings.DEMO_MODE})")
+    yield
+    try:
+        await pipeline.stop()
+    except Exception:
+        pass
+
+
+app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +44,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class RequestIDMiddleware:
+    """Pure ASGI middleware — no BaseHTTPMiddleware (avoids blocking the event loop)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        rid = ""
+        for name, value in scope.get("headers", []):
+            if name == b"x-request-id":
+                rid = value.decode("latin-1")
+                break
+        if not rid:
+            rid = uuid.uuid4().hex[:12]
+        RequestFilter.set_context(request_id=rid)
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"x-request-id", rid.encode("latin-1")))
+                message["headers"] = headers
+            return await send(message)
+
+        try:
+            return await self.app(scope, receive, send_wrapper)
+        finally:
+            RequestFilter.clear_context()
+
+
+app.add_middleware(RequestIDMiddleware)
 
 
 def bootstrap_admin() -> None:
@@ -65,26 +121,6 @@ async def _ml_retrain_loop() -> None:
             db.log_audit(actor="system", action="ml.retrain", result="FAILED", detail={"error": str(exc)})
 
 
-@app.on_event("startup")
-def startup() -> None:
-    validate_settings()
-    db.init_schema()
-    bootstrap_admin()
-    pipeline.start()
-    asyncio.get_event_loop().create_task(run_collector_loop())
-    asyncio.get_event_loop().create_task(_retention_loop())
-    asyncio.get_event_loop().create_task(_ml_retrain_loop())
-    print(f"{settings.APP_NAME} v{settings.APP_VERSION} started "
-          f"(env={settings.ENV}, storage={settings.DB_PATH}, demo_mode={settings.DEMO_MODE})")
-
-
-@app.on_event("shutdown")
-def shutdown() -> None:
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(pipeline.stop())
-    except Exception:
-        pass
 
 
 # --------------------------------------------------------------------------- #
@@ -96,10 +132,13 @@ from app.routes.agents import router as agents_router  # noqa: E402
 from app.routes.chatbot import router as chatbot_router  # noqa: E402
 from app.routes.events import router as events_router  # noqa: E402
 from app.routes.health import router as health_router  # noqa: E402
+from app.routes.hosts import router as hosts_router  # noqa: E402
 from app.routes.incidents import router as incidents_router  # noqa: E402
+from app.routes.ml_routes import router as ml_router  # noqa: E402
 from app.routes.network import router as network_router  # noqa: E402
 from app.routes.overview import router as overview_router  # noqa: E402
 from app.routes.phishing import router as phishing_router  # noqa: E402
+from app.routes.respond import router as respond_router  # noqa: E402
 from app.routes.rules import router as rules_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
@@ -107,12 +146,15 @@ app.include_router(overview_router, prefix="/api", tags=["Overview"])
 app.include_router(events_router, prefix="/api/events", tags=["Events"])
 app.include_router(incidents_router, prefix="/api/incidents", tags=["Incidents"])
 app.include_router(alerts_router, prefix="/api/alerts", tags=["Alerts"])
+app.include_router(hosts_router, prefix="/api/hosts", tags=["Hosts"])
 app.include_router(network_router, prefix="/api/network", tags=["Network"])
 app.include_router(rules_router, prefix="/api/rules", tags=["Rules"])
 app.include_router(phishing_router, prefix="/api/phishing", tags=["Phishing"])
 app.include_router(chatbot_router, prefix="/api/chatbot", tags=["Chatbot"])
 app.include_router(health_router, prefix="/api/system", tags=["System"])
 app.include_router(agents_router, prefix="/api/agents", tags=["Agents"])
+app.include_router(respond_router, prefix="/api/respond", tags=["Response"])
+app.include_router(ml_router, prefix="/api/ml", tags=["ML"])
 
 
 # --------------------------------------------------------------------------- #
@@ -128,14 +170,14 @@ def health() -> dict:
 # Authenticated WebSocket event stream
 # --------------------------------------------------------------------------- #
 @app.websocket("/ws/events")
-async def ws_events(websocket: WebSocket, token: str = ""):
+async def ws_events(websocket: WebSocket):
     """Authenticated live event stream.
 
-    Token may be supplied as a Sec-WebSocket-Protocol subprotocol header
-    (`sentinel.<token>`, keeps the token out of the URL) or via the legacy
-    `?token=` query parameter (kept for backward compatibility).
+    Token MUST be supplied as a Sec-WebSocket-Protocol subprotocol header
+    (`sentinel.<token>`). Tokens in URL query parameters are NOT accepted
+    because URLs can be logged by proxies, browsers, and monitoring systems.
     """
-    auth_token = token or _token_from_subprotocol(websocket)
+    auth_token = _token_from_subprotocol(websocket)
     if not auth_token:
         await websocket.close(code=4401)
         return
@@ -143,6 +185,15 @@ async def ws_events(websocket: WebSocket, token: str = ""):
         identity = decode_token(auth_token)
     except Exception:
         await websocket.close(code=4401)
+        return
+    # Enforce same checks as REST auth: user exists, is active, not revoked
+    from app.core.deps import _revoked_tokens, _user_is_active
+    raw_token = auth_token
+    if raw_token in _revoked_tokens:
+        await websocket.close(code=4401)
+        return
+    if not _user_is_active(identity.get("sub", "")):
+        await websocket.close(code=4403)
         return
     await ws_manager.connect(websocket, identity)
     try:
@@ -156,7 +207,7 @@ async def ws_events(websocket: WebSocket, token: str = ""):
 
 
 def _token_from_subprotocol(websocket: WebSocket) -> str:
-    for sub in websocket.headers.get_list("sec-websocket-protocol"):
+    for sub in websocket.headers.getlist("sec-websocket-protocol"):
         if sub.startswith("sentinel."):
             return sub[len("sentinel."):]
     return ""

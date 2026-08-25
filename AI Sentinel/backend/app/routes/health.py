@@ -11,6 +11,7 @@ from app.ml.anomaly import anomaly_detector
 from app.pipeline import pipeline
 from app.services.ws_manager import ws_manager
 from app.routes.agents import list_agent_status
+from app.telemetry.collector import get_collector_status
 
 router = APIRouter()
 
@@ -40,6 +41,7 @@ def health() -> dict:
         "database": "ok" if db_ok else "error",
         "pipeline_started": pipeline._started,
         "telemetry": _telemetry_status(),
+        "collector": get_collector_status(),
     }
 
 
@@ -81,6 +83,8 @@ def metrics(_payload: dict = Depends(current_user)) -> dict:
         "queue": {"depth": pipeline.queue_depth(), "maxsize": settings.QUEUE_MAXSIZE},
         "agents": list_agent_status(),
         "telemetry": _telemetry_status(),
+        "collector": get_collector_status(),
+        "backup_protection": {"targets": settings.BACKUP_TARGETS},
         "config": {
             "env": settings.ENV,
             "environment": settings.ENVIRONMENT,

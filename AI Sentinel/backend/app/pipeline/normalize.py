@@ -6,10 +6,12 @@ canonical security event with a stable schema and default severity.
 Canonical fields are always present:
   event_id, ts (UTC ISO-8601), source, source_type, host, environment,
   asset_id, is_simulated, event_type, category, severity, confidence,
-  risk_score, details, mitre, normalized_at, raw.
+  risk_score, details, mitre, raw_evidence_hash, normalized_at, raw.
 
 Missing values are `None` / empty — never fabricated.
 """
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from app.core.config import settings
@@ -81,6 +83,13 @@ def normalize_raw(raw: dict, source: str = "agent") -> dict:
     ev["mitre"] = ev.get("mitre", [])
     if not isinstance(ev["mitre"], list):
         ev["mitre"] = []
+
+    # SHA-256 hash of the raw payload for evidence integrity verification.
+    try:
+        raw_bytes = json.dumps(raw, sort_keys=True, default=str).encode("utf-8")
+        ev["raw_evidence_hash"] = hashlib.sha256(raw_bytes).hexdigest()
+    except Exception:
+        ev["raw_evidence_hash"] = ""
 
     # Track when this normalization step ran (used for latency instrumentation).
     ev["normalized_at"] = datetime.now(timezone.utc).isoformat()

@@ -1,5 +1,5 @@
 """Phishing analyzer unit tests."""
-from app.phishing.analyzer import analyze
+from app.phishing.analyzer import analyze, validate_url_format
 
 
 def _analyze(url):
@@ -33,4 +33,24 @@ def test_brand_in_domain_is_not_phishy_alone():
 
 def test_malformed_url_returns_verdict():
     r = _analyze("not-a-url")
-    assert r["verdict"] in ("SAFE", "SUSPICIOUS", "MALICIOUS")
+    assert r["verdict"] == "ERROR"
+    assert r["reasons"]
+    r2 = _analyze("hi..how are you?")
+    assert r2["verdict"] == "ERROR"
+    r3 = _analyze("")
+    assert r3["verdict"] == "ERROR"
+
+
+def test_validate_url_rejects_invalid():
+    assert validate_url_format("") is not None
+    assert validate_url_format("hello") is not None
+    assert validate_url_format("hi..how are you?") is not None
+    assert validate_url_format("not a url") is not None
+
+
+def test_validate_url_accepts_valid():
+    assert validate_url_format("https://example.com") is None
+    assert validate_url_format("http://example.com/path") is None
+    assert validate_url_format("example.com") is None
+    assert validate_url_format("sub.example.com") is None
+    assert validate_url_format("https://192.168.1.1/login") is None

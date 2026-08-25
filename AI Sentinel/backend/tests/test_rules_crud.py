@@ -1,6 +1,7 @@
 """Detection-rule management: create/update/version history/rollback/delete,
 and test-against-history on a live predicate."""
 import time
+from datetime import datetime, timedelta, timezone
 
 from conftest import TEST_PASSWORD, TEST_USERNAME
 
@@ -76,7 +77,8 @@ def test_rule_crud_and_rollback(client):
 
     # Test-against-history: fire the campaign, then ask the rule how it would behave.
     events = [
-        {"ts": f"2026-08-16T15:0{i}:00+00:00", "event_type": "auth.failed_login",
+        {"ts": (datetime.now(timezone.utc) - timedelta(minutes=i)).isoformat(),
+         "event_type": "auth.failed_login",
          "source_ip": "203.0.113.88", "username": f"u{i % 2}"}
         for i in range(7)
     ]

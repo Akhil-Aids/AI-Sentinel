@@ -1,6 +1,7 @@
 """Latency instrumentation, event lifecycle columns, dedup, agent heartbeat
 status, and restart persistence (idempotent schema re-init)."""
 import time
+from datetime import datetime, timedelta, timezone
 
 from conftest import TEST_PASSWORD, TEST_USERNAME
 
@@ -39,7 +40,8 @@ def test_event_lifecycle_columns_populated(client):
     token = _login(client)
     headers = {"Authorization": f"Bearer {token}"}
     events = [
-        {"ts": f"2026-08-16T16:0{i}:00+00:00", "event_type": "auth.failed_login",
+        {"ts": (datetime.now(timezone.utc) - timedelta(minutes=i)).isoformat(),
+         "event_type": "auth.failed_login",
          "source_ip": "203.0.113.90", "username": f"u{i % 2}"}
         for i in range(12)
     ]

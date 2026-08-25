@@ -64,6 +64,17 @@ class SystemMonitor:
             pass
         boot = psutil.boot_time()
         uptime = max(0, time.time() - boot)
+        logged_in_users = []
+        try:
+            for u in psutil.users():
+                logged_in_users.append({
+                    "name": u.name,
+                    "terminal": u.terminal or "",
+                    "host": u.host or "",
+                    "started": u.started,
+                })
+        except Exception:
+            pass
         return {
             "hostname": hostname(),
             "platform": platform.system(),
@@ -76,6 +87,7 @@ class SystemMonitor:
             "uptime_seconds": round(uptime, 1),
             "process_count": len(psutil.pids()),
             "boot_time": datetime.fromtimestamp(boot, timezone.utc).isoformat(),
+            "logged_in_users": logged_in_users,
         }
 
     def disk_snapshot(self) -> dict:
@@ -290,20 +302,38 @@ class FileMonitor:
             return ""
 
     def changes(self) -> list[dict]:
-        """Detect created / modified / deleted files since last sample. Real data."""
+        """Detect created / modified / deleted / renamed files since last sample. Real data."""
         events = []
         for root in self.roots:
             current = self._scan_root(root)
             previous = self._snapshot.get(root, {})
+            # Build hash -> path map for rename detection.
+            prev_hashes: dict[str, str] = {}
+            for fp, meta in previous.items():
+                if meta["hash"]:
+                    prev_hashes[meta["hash"]] = str(fp)
+            seen_renames: set[str] = set()
             for fp, meta in current.items():
                 if fp not in previous:
-                    events.append({
-                        "path": str(fp),
-                        "action": "created",
-                        "suffix": meta["suffix"],
-                        "size": meta["size"],
-                        "hash": meta["hash"],
-                    })
+                    prev_path = prev_hashes.get(meta["hash"])
+                    if prev_path and meta["hash"] and prev_path not in seen_renames:
+                        events.append({
+                            "path": str(fp),
+                            "action": "renamed",
+                            "old_path": prev_path,
+                            "suffix": meta["suffix"],
+                            "size": meta["size"],
+                            "hash": meta["hash"],
+                        })
+                        seen_renames.add(prev_path)
+                    else:
+                        events.append({
+                            "path": str(fp),
+                            "action": "created",
+                            "suffix": meta["suffix"],
+                            "size": meta["size"],
+                            "hash": meta["hash"],
+                        })
                 elif previous[fp]["mtime"] != meta["mtime"] or previous[fp]["size"] != meta["size"]:
                     events.append({
                         "path": str(fp),
@@ -313,13 +343,14 @@ class FileMonitor:
                         "hash": meta["hash"],
                     })
             for fp in set(previous) - set(current):
-                events.append({
-                    "path": str(fp),
-                    "action": "deleted",
-                    "suffix": previous[fp]["suffix"],
-                    "size": previous[fp]["size"],
-                    "hash": previous[fp]["hash"],
-                })
+                if str(fp) not in seen_renames:
+                    events.append({
+                        "path": str(fp),
+                        "action": "deleted",
+                        "suffix": previous[fp]["suffix"],
+                        "size": previous[fp]["size"],
+                        "hash": previous[fp]["hash"],
+                    })
             self._snapshot[root] = current
         return events
 

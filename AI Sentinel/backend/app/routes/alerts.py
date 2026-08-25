@@ -28,6 +28,17 @@ def list_alerts(
     return {"items": db.list_alerts(limit=limit, severity=severity, status=status)}
 
 
+@router.get("/{alert_id}")
+def get_alert(
+    alert_id: str,
+    _payload: dict = Depends(current_user),
+) -> dict:
+    alert = db.get_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return alert
+
+
 @router.patch("/{alert_id}")
 def update_alert(
     alert_id: str,
