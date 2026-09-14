@@ -30,7 +30,7 @@ def _env_int(name: str, default: int) -> int:
 
 class Settings:
     APP_NAME = "AI Sentinel"
-    APP_VERSION = "2.0.0"
+    APP_VERSION = "3.0.0"
     ENV = os.getenv("SENTINEL_ENV", "development")
     DEBUG = _env_bool("SENTINEL_DEBUG", False)
 
@@ -105,6 +105,49 @@ class Settings:
     # --- Simulated / demo mode -------------------------------------------------
     # Explicitly off unless enabled. Demo mode never feeds the production store.
     DEMO_MODE = _env_bool("SENTINEL_DEMO_MODE", False)
+    # Seconds between synthetic demo batches when demo mode is active.
+    DEMO_INTERVAL = _env_int("SENTINEL_DEMO_INTERVAL", 45)
+
+    # --- Notifications ---------------------------------------------------------
+    # Optional REST webhook channel. Empty = channel simply reports NOT_CONFIGURED;
+    # the system never pretends an unconfigured integration is active.
+    NOTIFY_WEBHOOK_URL = os.getenv("SENTINEL_NOTIFY_WEBHOOK_URL", "")
+    # Only alerts at or above this severity raise notifications.
+    NOTIFY_MIN_SEVERITY = os.getenv("SENTINEL_NOTIFY_MIN_SEVERITY", "critical")
+
+    # --- IOC management -------------------------------------------------------
+    # Automatically raise an alert when a malicious IOC matches an event on
+    # ingress. Kept on by default; tiered by confidence in the IOC service.
+    IOC_AUTO_ALERT = _env_bool("SENTINEL_IOC_AUTO_ALERT", True)
+    # Minimum confidence (0-1) for an IOC hit to raise an alert automatically.
+    IOC_MIN_ALERT_CONFIDENCE = float(os.getenv("SENTINEL_IOC_MIN_ALERT_CONFIDENCE", "0.5"))
+    # Seconds an IOC lookup cache stays fresh (thread-safe, bounded).
+    IOC_CACHE_TTL_SECONDS = _env_int("SENTINEL_IOC_CACHE_TTL", 30)
+    # Match window for deduplicating repeated ioc hits on the same indicator.
+    IOC_ALERT_DEDUP_MINUTES = _env_int("SENTINEL_IOC_ALERT_DEDUP_MINUTES", 30)
+
+    # --- Response approvals ---------------------------------------------------
+    # Destructive actions at or above this severity require manager approval
+    # (BLOCKED:PENDING_APPROVAL) instead of executing immediately.
+    APPROVAL_REQUIRED_MIN_SEVERITY = os.getenv("SENTINEL_APPROVAL_MIN_SEVERITY", "high")
+
+    # --- Durable metric history -----------------------------------------------
+    # Persist periodic operational metrics (EPS, latency, counters) into
+    # metric_history so dashboards and reports can show real historical trends.
+    METRIC_HISTORY_ENABLED = _env_bool("SENTINEL_METRIC_HISTORY", True)
+    METRIC_HISTORY_INTERVAL = _env_int("SENTINEL_METRIC_HISTORY_INTERVAL", 60)
+
+    # --- Risk scoring ---------------------------------------------------------
+    # Recompute user/asset risk summaries when they are older than this many
+    # seconds (computed on access, never block the hot path).
+    RISK_CACHE_TTL_SECONDS = _env_int("SENTINEL_RISK_CACHE_TTL", 300)
+
+    # --- Multi-factor authentication -----------------------------------------
+    # Roles that MUST have TOTP MFA enrolled (comma separated, e.g.
+    # ADMIN,SECURITY_ENGINEER). Empty = no enforcement so operators can enable
+    # MFA for users gradually. The MFA flow itself is always available.
+    MFA_REQUIRED_ROLES = [r.strip().upper() for r in
+                          os.getenv("SENTINEL_MFA_REQUIRED_ROLES", "").split(",") if r.strip()]
 
 
 settings = Settings()

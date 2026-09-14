@@ -147,12 +147,15 @@ check("smoke agent visible", any(a.get("agent_id") == "smoke-agent" for a in age
 check("telemetry OK", (body.get("telemetry") or {}).get("status") == "OK", str((body.get("telemetry") or {}).get("status")))
 check("collector agent registered", any(str(a.get("agent_id")).startswith("collector-") for a in agents), str([a.get("agent_id") for a in agents]))
 
-# 11. response actions: permitted non-destructive executes; destructive blocked in dry-run
+# 11. response actions: permitted non-destructive executes; destructive blocked
+# In dry-run mode high-severity destructive actions now require approval (PENDING_APPROVAL)
+# while lower severity ones are policy-blocked (BLOCKED).
 target = incidents[0]["incident_id"]
 st, body = req("POST", f"/incidents/{target}/respond", {"action": "PRESERVE_EVIDENCE", "reason": "e2e smoke"}, token=tok)
 check("preserve_evidence executes", st == 200 and body.get("result") == "SUCCESS", str(body.get("result")))
 st, body = req("POST", f"/incidents/{target}/respond", {"action": "BLOCK_IP", "reason": "e2e smoke"}, token=tok)
-check("destructive blocked in dry-run", st == 200 and body.get("result") == "BLOCKED", str(body.get("result")))
+check("destructive requires approval or blocked in dry-run", st == 200 and body.get("result") in ("BLOCKED", "PENDING_APPROVAL"),
+      str(body.get("result")))
 st, body = req("GET", f"/incidents/{target}/actions", token=tok)
 acts = body.get("items") or []
 check("action history promoted fields", len(acts) >= 1 and acts[0].get("requested_by", "").startswith("admin") and acts[0].get("created_at"), str([a.get("action") for a in acts][:4]))

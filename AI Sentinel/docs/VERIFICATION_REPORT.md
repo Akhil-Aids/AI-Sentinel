@@ -4,6 +4,13 @@ Status date: 2026-08-16 · Baseline: fresh DB, fresh bootstrap admin, real (non-
 data path. Evidence sources: `pytest` (57 passed, 4 warnings), `backend/scripts/e2e_smoke.py`
 (27/27 PASS against a live server), `vite build` (clean), and direct API probes.
 
+> **Session 2 (AI Sentinel X) update — 2026-09-14:** the suite grew to **170 pytest
+> cases passing** (86 original + 24 new X-phase integration tests + the X5–X8 suites),
+> the frontend still builds clean via `vite build`, and a **live-server E2E smoke**
+> re-verified every new capability below against `localhost:8000`. Section G records
+> that session. The earlier blocker list (Section “Honest blockers”) remains valid
+> unless superseded in G.
+
 Legend: **VERIFIED** = exercised in this session (test or live E2E). **PARTIAL** = code present,
 not fully exercised end-to-end. **NOT VERIFIED** = present in code, no runtime check.
 
@@ -84,6 +91,47 @@ not fully exercised end-to-end. **NOT VERIFIED** = present in code, no runtime c
 | F7. Phishing page: analyze + evidence + incident link | VERIFIED | code + build; scan↔incident link now returned by API |
 | F8. Incident detail: timeline, raw events, notes, status, response actions (destructive confirm), action history | VERIFIED | code + build (dead ternary fixed; history panel added) |
 | F9. Single-container static hosting + SPA routing | VERIFIED | FastAPI serves `frontend/dist`; build artifact current |
+
+## G. AI Sentinel X session (2026-09-14) — X1..X8
+
+Status date: 2026-09-14. Suite: **170 passed** (`pytest -q`, ~30s) · `frontend/dist`
+rebuilt clean (`vite build`) · live-server E2E smoke against `localhost:8000` (backend
+restarted from new code) logged below. All routes use the codebase’s trailing-slash /
+Exact-path conventions; new tables are present in `init_schema` and idempotent.
+
+| Check | Status | Evidence |
+|---|---|---|
+| G1. Tamper-evident audit: `prev_hash`/`record_hash` HMAC-SHA256 chain on `audit_logs`; legacy backfill; verify endpoint | VERIFIED | `test_audit_integrity.py` (6) · live `GET /api/system/audit/verify` → `{"records":1414,"verified":1414,"integrity":"OK"}` |
+| G2. MFA (TOTP RFC 6238, stdlib only): enroll→confirm→login second factor; partial-token gate; admin force-disable; `MFA_REQUIRED_ROLES` | VERIFIED | `test_mfa.py` (6) · live `/auth/mfa/status` returns `enabled` bool without leaking secrets |
+| G3. API keys: `sk_live_` keys, scoped (`read`/`ingest`/…), role-bound, rotate/revoke, agent ingest header auth | VERIFIED | `test_api_keys.py` (6) · live: create key → `POST /events/ingest/agent` with `X-API-Key` accepted=1 and `last_used_at` recorded |
+| G4. Cases + evidence + SOC tasks tables/routes/frontend pages | VERIFIED | `test_cases_evidence_tasks.py` (6) · live create case/task/evidence (evidence returned `integrity_status=VERIFIED`) |
+| G5. Evidence immutability + SHA-256 integrity verdicts (VERIFIED/PENDING/TAMPERED/NOT_APPLICABLE) | VERIFIED | `test_cases_evidence_tasks.py` · live evidence `content_hash` + `re-verify` endpoint |
+| G6. SLA engine: `sla_policies` seed/reset, per-incident states MET/WITHIN_SLA/APPROACHING/BREACHED/SLA_PAUSED/NO_TARGET, summary | VERIFIED | `test_sla.py` (5) · live: stale incident → `state=BREACHED elapsed=169.6m target=120m` |
+| G7. MITRE center: coverage/detecting/verified-live/rules-disabled/observed-no-rules + gap recommendations + incident review | VERIFIED | `test_mitre_center.py` (6) · live `/mitre/coverage/` (22 techniques) · review on real incident returned COMPLETE with findings+recommendations |
+| G8. Posture engine: data-derived score + per-factor deltas + snapshot history | VERIFIED | `test_posture.py` (4) · live `score=70 FAIR` → recorded snapshot visible in `/posture/history` |
+| G9. Data quality center: ingest/normalize/error/lag counters, per-source, evidence integrity, recommendations | VERIFIED | `test_data_quality.py` (4) · live overview counts the runtime DB (4.8k ingested) |
+| G10. Frontend: new nav (Cases, Evidence, SOC Tasks, SLA, MITRE, Posture, Data Quality), MFA login flow, System page MFA/API-keys/audit-verify panels | VERIFIED | `vite build` clean; routes wired in `App.jsx`/`Layout.jsx`; live endpoints match frontend helpers |
+| G11. Incident detail now returns `sla`, `evidence_items`, `tasks` (list-route SLA enrichment added without breaking list shape) | VERIFIED | `test_sla.py` detail test; live `/incidents/{id}` returns the new fields |
+
+## Honest blockers / known limitations (Session 2 additions)
+
+11. **SLA is computed on-request** from stored timestamps — there is no
+    scheduler that "ticks" incident SLAs or a separate SLA breach table; the
+    state is always derived live, which is deterministic and honest but
+    recomputed per read.
+12. **MFA enforcement is opt-in by policy** (`SENTINEL_MFA_REQUIRED_ROLES`
+    defaults empty) so existing deployments and tests keep working; admins can
+    switch on enforcement per role. Self-service enrollment + mandatory
+    verification at login are implemented and verified.
+13. **MITRE tactic labels are a small curated map** (~30 common techniques); any
+    technique outside the map is reported as `Unclassified` — never invented.
+    Coverage counts are exact over what the platform stores.
+14. **Posture factor deltas are bounded heuristics** (each factor capped), all
+    derived from live counts — but weights are not machine-learned. Scores are
+    explainable, not statistically calibrated.
+15. **Live smoke created a few demo rows** (one case, one task, one evidence
+    record, one API key, several audit entries) in the runtime `data/sentinel.db`
+    while exercising the new endpoints.
 
 ---
 

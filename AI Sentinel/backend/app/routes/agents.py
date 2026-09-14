@@ -32,11 +32,52 @@ class Heartbeat(BaseModel):
     processes: int = 0
 
 
+def _agent_auth(agent_key: str, api_key: str) -> None:
+    """Accept the legacy shared agent key OR a managed API key (scope ingest)."""
+    from app.core import apikey as apikey_core
+    if settings.AGENT_KEY and agent_key and agent_key == settings.AGENT_KEY:
+        return
+    if api_key:
+        parts = apikey_core.parse_header(api_key)
+        if parts:
+            record = verify_api_key_helper(parts[0], parts[1])
+            if record:
+                return
+    raise HTTPException(status_code=401, detail="Invalid or missing agent credentials")
+
+
+def verify_api_key_helper(key_id: str, secret: str):
+    """Validate API key credentials, returning the key record or None."""
+    from app.core import apikey as apikey_core
+    from datetime import datetime, timezone
+    record = db.get_api_key_auth(key_id)
+    if not record:
+        return None
+    if record.get("revoked_at"):
+        return None
+    if record.get("expires_at"):
+        try:
+            exp = datetime.fromisoformat(record["expires_at"])
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > exp:
+                return None
+        except Exception:
+            return None
+    if not apikey_core.verify_digest(key_id, secret, record.get("key_hash", "")):
+        return None
+    allowed_scopes = [s.strip() for s in (record.get("scope") or "").split(",") if s.strip()]
+    if "ingest" not in allowed_scopes and "admin" not in allowed_scopes:
+        return None
+    db.touch_api_key_last_used(key_id)
+    return record
+
+
 @router.post("/heartbeat")
 def heartbeat(body: Heartbeat,
-              agent_key: str = Header(default="", alias="X-Agent-Key")) -> dict:
-    if not settings.AGENT_KEY or agent_key != settings.AGENT_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing agent key")
+              agent_key: str = Header(default="", alias="X-Agent-Key"),
+              api_key: str = Header(default="", alias="X-API-Key")) -> dict:
+    _agent_auth(agent_key, api_key)
     agent = db.upsert_agent_heartbeat(body.agent_id, {
         "hostname": body.hostname,
         "ip": body.ip,

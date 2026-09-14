@@ -87,6 +87,26 @@ export default function DashboardPage() {
         <Kpi label="ML Model" value={ml?.enabled ? 'Active' : 'Off'} sub={ml?.model_loaded ? `v${ml?.version} · ${ml?.trained_samples} samples` : 'collecting samples…'} tone={ml?.model_loaded ? 'emerald' : 'accent'} />
       </div>
 
+      <div className="panel mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="title mb-0">SOC Response Metrics</h3>
+          <span className="text-[10px] uppercase tracking-wide text-slate-500">computed from acked / resolved alerts</span>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {(['mttd', 'mtta', 'mttr_respond', 'mttr_resolve']).map((k) => {
+            const m = data?.soc_metrics?.[k] || {};
+            const v = m.minutes != null ? `${Math.round(m.minutes * 10) / 10} min` : '—';
+            return (
+              <div key={k}>
+                <p className="label">{m.label || k.toUpperCase()}</p>
+                <p className={`value ${m.samples ? 'text-accent' : 'text-slate-500'}`}>{v}</p>
+                <p className="text-xs text-slate-400 mt-1">{m.samples ? `${m.samples} sample${m.samples === 1 ? '' : 's'}` : 'no data yet'}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
         <Panel title="Network Throughput" className="xl:col-span-2">
           {traffic.series?.length ? (

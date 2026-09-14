@@ -70,12 +70,15 @@ def _sign(message: str) -> str:
     return hmac.new(settings.AUTH_SECRET.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def issue_token(username: str, role: str, ttl_seconds: Optional[int] = None) -> str:
+def issue_token(username: str, role: str, ttl_seconds: Optional[int] = None,
+                extra: Optional[dict] = None) -> str:
     if role not in ROLES:
         raise ValueError(f"Unknown role: {role}")
     ttl = ttl_seconds or settings.TOKEN_TTL_SECONDS
     now = int(time.time())
     payload = {"sub": username, "role": role, "iat": now, "exp": now + ttl, "jti": secrets.token_hex(8)}
+    if extra:
+        payload.update(extra)
     body = _b64(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     sig = _sign(body)
     return f"{body}.{sig}"

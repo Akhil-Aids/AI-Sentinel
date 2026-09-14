@@ -16,6 +16,11 @@ class AlertUpdate(BaseModel):
     status: Optional[str] = None
     assigned_to: Optional[str] = None
     feedback: Optional[str] = None
+    note: Optional[str] = None
+
+
+class AlertNote(BaseModel):
+    note: str
 
 
 @router.get("/")
@@ -62,6 +67,43 @@ def update_alert(
             raise HTTPException(status_code=400, detail="Invalid feedback value")
         fields["feedback"] = body.feedback
     db.update_alert(alert_id, **fields)
+
+    # Immutable lifecycle trail: status transitions, assignments, and feedback.
+    if "status" in fields and fields["status"] != alert.get("status"):
+        db.add_alert_history(alert_id, "status", alert.get("status", ""), fields["status"],
+                             actor=_payload["sub"], note=body.note or "")
+    if "assigned_to" in fields and fields["assigned_to"] != alert.get("assigned_to", ""):
+        db.add_alert_history(alert_id, "assigned", "", fields["assigned_to"],
+                             actor=_payload["sub"], note=body.note or "")
+    if "feedback" in fields and fields["feedback"] != alert.get("feedback", ""):
+        db.add_alert_history(alert_id, "feedback", alert.get("feedback", ""), fields["feedback"],
+                             actor=_payload["sub"], note=body.note or "")
+    if body.note:
+        db.add_notes("alert", alert_id, body.note, author=_payload["sub"])
     db.log_audit(actor=_payload["sub"], role=_payload["role"], action="alert.update",
                  target=alert_id, ip=client_ip(request), detail=fields)
     return db.get_alert(alert_id)
+
+
+@router.get("/{alert_id}/history")
+def alert_history(alert_id: str, _payload: dict = Depends(current_user)) -> dict:
+    alert = db.get_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"items": db.list_alert_history(alert_id),
+            "notes": db.list_notes("alert", alert_id)}
+
+
+@router.post("/{alert_id}/notes")
+def add_alert_note(alert_id: str, body: AlertNote, request: Request,
+                   _payload: dict = Depends(require_privilege_at_least("SOC_ANALYST"))) -> dict:
+    alert = db.get_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    if not body.note.strip():
+        raise HTTPException(status_code=400, detail="Note cannot be empty")
+    note = db.add_notes("alert", alert_id, body.note.strip(), author=_payload["sub"])
+    db.add_alert_history(alert_id, "note", "", "", actor=_payload["sub"], note=body.note.strip())
+    db.log_audit(actor=_payload["sub"], role=_payload["role"], action="alert.note",
+                 target=alert_id, ip=client_ip(request))
+    return note

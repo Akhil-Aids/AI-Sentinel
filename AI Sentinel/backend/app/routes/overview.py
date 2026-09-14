@@ -8,6 +8,7 @@ from app.core.deps import current_user
 from app.pipeline import pipeline
 from app.risk import risk_level
 from app.ml.anomaly import anomaly_detector
+from app.services.metrics import soc_metrics
 
 router = APIRouter()
 
@@ -151,4 +152,5 @@ def overview(_payload: dict = Depends(current_user)) -> dict:
         "data_status": data_status,
         "ml": anomaly_detector.status(),
         "pipeline": pipeline.stats(),
+        "soc_metrics": soc_metrics(),
     }

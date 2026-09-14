@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app import db
+from app.core import apikey as apikey_core
 from app.core.config import settings
 from app.core.deps import client_ip, current_user, require_privilege_at_least
 from app.pipeline import pipeline
@@ -78,12 +79,17 @@ def ingest_agent_events(
     batch: EventBatch,
     request: Request,
     agent_key: Optional[str] = Header(default=None, alias="X-Agent-Key"),
+    api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
 ) -> dict:
-    """Agent-only ingestion using the shared agent key (no user token)."""
-    if not settings.AGENT_KEY or agent_key != settings.AGENT_KEY:
+    """Agent-only ingestion using the legacy shared key OR a managed API key."""
+    if not _agent_credentials_valid(agent_key or "", api_key or ""):
         db.log_audit(actor="agent", action="events.ingest_agent", result="FAILED",
                      ip=client_ip(request), detail={"reason": "invalid agent key"})
-        raise HTTPException(status_code=401, detail="Invalid or missing agent key")
+        raise HTTPException(status_code=401, detail="Invalid or missing agent credentials")
+    if apikey_core.parse_header(api_key or ""):
+        auth_name = f"apikey:{apikey_core.parse_header(api_key)[0]}"
+    else:
+        auth_name = "agent"
     if len(batch.events) > MAX_BATCH_EVENTS:
         raise HTTPException(status_code=400,
                             detail=f"Batch exceeds limit of {MAX_BATCH_EVENTS} events")
@@ -98,9 +104,20 @@ def ingest_agent_events(
             accepted += 1
         else:
             dropped += 1
-    db.log_audit(actor="agent", action="events.ingest_agent", result="SUCCESS",
+    db.log_audit(actor=auth_name, action="events.ingest_agent", result="SUCCESS",
                  ip=client_ip(request), detail={"accepted": accepted, "dropped": dropped, "rejected": rejected})
     return {"accepted": accepted, "dropped": dropped, "rejected": rejected}
+
+
+def _agent_credentials_valid(agent_key: str, api_key: str) -> bool:
+    from app.routes.agents import verify_api_key_helper
+    if settings.AGENT_KEY and agent_key and agent_key == settings.AGENT_KEY:
+        return True
+    if api_key:
+        parts = apikey_core.parse_header(api_key)
+        if parts and verify_api_key_helper(parts[0], parts[1]):
+            return True
+    return False
 
 
 @router.get("/")

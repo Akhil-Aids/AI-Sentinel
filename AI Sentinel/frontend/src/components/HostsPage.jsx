@@ -40,7 +40,9 @@ export default function HostsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {hosts.map((h) => (
-          <div key={h.hostname || h.agent_id} className="panel">
+          <a key={h.hostname || h.agent_id} href={`/hosts/${encodeURIComponent(h.hostname || h.agent_id)}`}
+            onClick={(e) => { e.preventDefault(); window.history.pushState({}, '', `/hosts/${encodeURIComponent(h.hostname || h.agent_id)}`); window.dispatchEvent(new PopStateEvent('popstate')); }}
+            className="panel block hover:border-accent/40 transition-colors">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h3 className="text-sm font-semibold text-slate-100">{h.hostname || h.agent_id}</h3>
@@ -84,7 +86,7 @@ export default function HostsPage() {
                 <span className="text-slate-400">{h.last_heartbeat_at ? fmtTime(h.last_heartbeat_at) : 'Never'}</span>
               </div>
             </div>
-          </div>
+          </a>
         ))}
       </div>
     </Layout>

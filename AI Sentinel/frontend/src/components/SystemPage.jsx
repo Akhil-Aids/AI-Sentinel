@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { applyRetention, changePassword, createUser, getRole, getSystemAudit, getSystemHealth, getSystemMetrics, listUsers, updateUser } from '../api';
+import { applyRetention, changePassword, createApiKey, createUser, getRole, getSystemAudit, getSystemHealth, getSystemMetrics, listApiKeys, listUsers, mfaConfirm, mfaDisable, mfaEnroll, mfaStatus, rotateApiKey, revokeApiKey, updateUser } from '../api';
 import Layout from './Layout';
 import { Empty, Loading, fmtTime } from './ui';
 
@@ -19,6 +19,15 @@ export default function SystemPage() {
   const [pwForm, setPwForm] = useState({ current_password: '', new_password: '' });
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'VIEWER' });
 
+  // MFA + API keys
+  const [mfa, setMfa] = useState(null);
+  const [mfaPending, setMfaPending] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaPw, setMfaPw] = useState('');
+  const [keys, setKeys] = useState([]);
+  const [keyForm, setKeyForm] = useState({ name: '', scope: 'read', role: 'VIEWER' });
+  const [auditVerify, setAuditVerify] = useState(null);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -27,6 +36,10 @@ export default function SystemPage() {
       setMetrics(m);
       setAudit(a.items || []);
       setUsers(u.items || []);
+      mfaStatus().then(setMfa).catch(() => setMfa(null));
+      if (getRole() === 'ADMIN') {
+        listApiKeys().then((r) => setKeys(r.items || [])).catch(() => setKeys([]));
+      }
     } catch (e) { /* ignore */ } finally {
       setLoading(false);
     }
@@ -64,6 +77,74 @@ export default function SystemPage() {
   const toggleUserActive = async (u) => {
     try {
       await updateUser(u.id, { is_active: !u.is_active });
+      load();
+    } catch (e) { flash(e.message); }
+  };
+
+  const auditChainVerify = async () => {
+    try {
+      const res = await fetch('/api/system/audit/verify', { headers: { Authorization: `Bearer ${localStorage.getItem('ai_sentinel_token')}` } });
+      const body = await res.json();
+      setAuditVerify({ ok: res.ok, body });
+      flash(res.ok ? 'Audit chain integrity verified.' : 'Audit chain verification FAILED. Inspect result.');
+    } catch (e) { flash(e.message); }
+  };
+
+  const doMfaStart = async () => {
+    const password = window.prompt('Confirm your password to enable MFA:');
+    if (!password) return;
+    try {
+      const r = await mfaEnroll(password);
+      setMfaPending(r);
+      setMfaPw(password);
+    } catch (e) { flash(e.message); }
+  };
+
+  const doMfaConfirm = async () => {
+    try {
+      await mfaConfirm(mfaCode);
+      setMfaPending(null);
+      setMfaCode('');
+      setMfaPw('');
+      flash('MFA enabled. Use your authenticator on next login.');
+      mfaStatus().then(setMfa).catch(() => setMfa(null));
+    } catch (e) { flash(e.message); }
+  };
+
+  const doMfaDisable = async () => {
+    const password = window.prompt('Confirm your password to disable MFA:');
+    if (!password) return;
+    const code = window.prompt('Current TOTP code:');
+    if (!code) return;
+    try {
+      await mfaDisable(password, code);
+      flash('MFA disabled.');
+      mfaStatus().then(setMfa).catch(() => setMfa(null));
+    } catch (e) { flash(e.message); }
+  };
+
+  const doCreateKey = async () => {
+    if (keyForm.name.length < 3) { flash('Key name required (3+ chars).'); return; }
+    try {
+      const r = await createApiKey({ ...keyForm, scope: keyForm.scope.split(',') });
+      flash(`API key ${r.key_id} created. Secret: ${r.key}. Save it now — it will not be shown again.`);
+      setKeyForm({ name: '', scope: 'read', role: 'VIEWER' });
+      load();
+    } catch (e) { flash(e.message); }
+  };
+
+  const doRotateKey = async (id) => {
+    try {
+      const r = await rotateApiKey(id);
+      flash(`Key ${id} rotated. NEW secret: ${r.key}. Save it now.`);
+      load();
+    } catch (e) { flash(e.message); }
+  };
+
+  const doRevokeKey = async (id) => {
+    try {
+      await revokeApiKey(id);
+      flash(`Key ${id} revoked.`);
       load();
     } catch (e) { flash(e.message); }
   };
@@ -228,8 +309,81 @@ export default function SystemPage() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div className="panel">
+          <h3 className="title mb-3">My MFA (TOTP)</h3>
+          {!mfa ? <Empty message="MFA status unknown." /> : mfa.enabled ? (
+            <div className="flex items-center justify-between rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">
+              <div>
+                <p className="font-medium text-emerald-300">Enabled</p>
+                <p className="text-xs text-slate-400">Authenticator verified (confirmed {mfa.confirmed_at ? `at ${fmtTime(mfa.confirmed_at)}` : ''})</p>
+              </div>
+              <button className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-300" onClick={doMfaDisable}>Disable</button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-slate-300">TOTP (RFC 6238) proactive two-factor. Enforce at login and on role-gated actions.</p>
+              <button className="btn" onClick={doMfaStart}>Enable MFA</button>
+              {mfaPending ? (
+                <div className="mt-3 space-y-2 rounded-lg border border-slate-700 p-3">
+                  <p className="text-xs text-slate-300">Scan this secret into your authenticator app:</p>
+                  <p className="rounded bg-black/30 p-2 font-mono text-xs text-accent break-all">{mfaPending.secret}</p>
+                  <input className="input" placeholder="6-digit code" value={mfaCode} maxLength={6}
+                    onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))} />
+                  <button className="btn w-full" onClick={doMfaConfirm} disabled={mfaCode.length !== 6}>Confirm Code</button>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <h3 className="title mb-3">API Keys (machine access)</h3>
+          <p className="mb-3 text-xs text-slate-500">Scoped machine credentials for agent heartbeats and event ingestion. Secret is shown exactly once.</p>
+          {getRole() === 'ADMIN' ? (
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <input className="input" placeholder="Key name*" value={keyForm.name} onChange={(e) => setKeyForm({ ...keyForm, name: e.target.value })} />
+              <input className="input" placeholder="scopes (comma-sep)" value={keyForm.scope} onChange={(e) => setKeyForm({ ...keyForm, scope: e.target.value })} />
+              <select className="input" value={keyForm.role} onChange={(e) => setKeyForm({ ...keyForm, role: e.target.value })}>
+                {['VIEWER', 'SOC_ANALYST', 'SECURITY_ENGINEER', 'ADMIN'].map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <button className="btn" onClick={doCreateKey}>Create Key</button>
+            </div>
+          ) : null}
+          <div className="space-y-2 max-h-56 overflow-auto">
+            {keys.length === 0 ? <Empty message="No API keys." /> : keys.map((k) => (
+              <div key={k.key_id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 p-2 text-xs">
+                <div className="min-w-0">
+                  <p className="font-medium">{k.name}</p>
+                  <p className="font-mono text-[10px] text-slate-500">{k.key_id} · {k.scope || '—'} · {k.role}</p>
+                  {k.last_used_at ? <p className="text-[10px] text-slate-600">last used {fmtTime(k.last_used_at)}</p> : <p className="text-[10px] text-amber-400/70">never used</p>}
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button className="rounded border border-slate-700 px-2 py-1" onClick={() => doRotateKey(k.key_id)}>Rotate</button>
+                  {k.revoked_at ? <span className="text-[10px] uppercase text-red-400">revoked</span> : (
+                    <button className="rounded border border-red-400/40 px-2 py-1 text-red-300" onClick={() => doRevokeKey(k.key_id)}>Revoke</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="panel">
-        <h3 className="title mb-3">Audit Trail (recent)</h3>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="title mb-0">Audit Trail (recent)</h3>
+          <span className="flex items-center gap-2">
+            {auditVerify ? (
+              <span className={`text-[11px] ${auditVerify.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                {auditVerify.ok && auditVerify.body.valid ? 'chain VALID' : `chain ${auditVerify.body.valid === false ? 'TAMPERED' : 'CHECK FAILED'}`}
+              </span>
+            ) : null}
+            <button className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-300" onClick={auditChainVerify}>
+              Verify chain integrity
+            </button>
+          </span>
+        </div>
         {audit.length === 0 ? <Empty message="No audit entries." /> : (
           <div className="max-h-96 overflow-auto">
             <table className="w-full text-xs">

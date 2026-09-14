@@ -30,6 +30,7 @@ from app.ml.anomaly import anomaly_detector
 from app.pipeline.normalize import normalize_raw
 from app.risk import event_risk, risk_level
 from app.services.ws_manager import ws_manager
+from app.services.notify import notify_alert
 from app import threat_intel
 
 _QUEUE: Optional[asyncio.Queue] = None
@@ -190,6 +191,26 @@ class EventPipeline:
             self._maybe_broadcast_stats()
             return
 
+        # IOC matching on ingress, independent of rule detection. A malicious
+        # indicator match records evidence and may raise a high-confidence alert.
+        ioc_matches = []
+        try:
+            from app.services.ioc import ioc_service
+            ioc_matches = ioc_service.match_event(ev)
+            if ioc_matches:
+                ev["ioc_matches"] = ioc_matches
+                self._broadcast({
+                    "type": "ioc_match",
+                    "payload": {
+                        "event_id": ev.get("event_id"),
+                        "event_type": ev.get("event_type"),
+                        "host": ev.get("host"),
+                        "matches": ioc_matches,
+                    },
+                })
+        except Exception:
+            pass
+
         # Collect real telemetry samples for ML training.
         if ev.get("event_type") in {"telemetry.snapshot", "server.metrics"}:
             anomaly_detector.collect_sample(ev)
@@ -292,6 +313,13 @@ class EventPipeline:
             details = ev.get("details") or {}
             if details.get("url"):
                 db.link_phishing_scan_to_incident(details["url"], incident["incident_id"])
+
+        if alert:
+            # Fire in-app + optional webhook notifications for high/critical alerts.
+            try:
+                notify_alert(alert, incident_id=incident["incident_id"])
+            except Exception:
+                pass
 
         if not alert:
             # Deduplicated event appended to the existing alert; still broadcast

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getIncident, getIncidentActions, getResponsePolicies, respondToIncident, updateIncident } from '../api';
+import { getIncident, getIncidentActions, getResponsePolicies, respondToIncident, updateIncident, createIncidentReport } from '../api';
 import Layout from './Layout';
 import { Empty, Loading, SeverityBadge, StatusBadge, fmtTime } from './ui';
 
@@ -48,7 +48,13 @@ export default function IncidentDetailPage() {
     if (destructive && !window.confirm(`Execute DESTRUCTIVE action "${action}" on this incident? This cannot be undone.`)) return;
     try {
       const r = await respondToIncident(id, action, reason);
-      setMsg(r.dry_run ? `Dry-run: ${r.reason}` : `${action} executed (${r.reason || 'no reason'})`);
+      if (r.result === 'PENDING_APPROVAL') {
+        setMsg(`Approval required. Request ${r.approval_id} created — resolve it in the Approval Center.`);
+      } else if (r.dry_run) {
+        setMsg(`Dry-run: ${r.reason}`);
+      } else {
+        setMsg(`${action} executed (${r.reason || 'no reason'})`);
+      }
       load();
     } catch (e) {
       setMsg(e.message);
@@ -78,6 +84,13 @@ export default function IncidentDetailPage() {
             <SeverityBadge severity={inc.severity} />
             <StatusBadge status={inc.status} />
           </div>
+          <div>
+            <button className="btn" onClick={async () => {
+              try { await createIncidentReport(inc.incident_id); setMsg('Incident report generated — open it under Reports.'); }
+              catch (e) { setMsg(e.message); }
+              setTimeout(() => setMsg(''), 4000);
+            }}>Generate Incident Report</button>
+          </div>
         </div>
 
         <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
@@ -85,6 +98,21 @@ export default function IncidentDetailPage() {
           <div><p className="text-slate-400 text-xs uppercase">Category</p><p className="mt-1 capitalize">{inc.category || '—'}</p></div>
           <div><p className="text-slate-400 text-xs uppercase">Source IP</p><p className="mt-1 font-mono text-xs">{inc.source_ip || '—'}</p></div>
           <div><p className="text-slate-400 text-xs uppercase">Host / User</p><p className="mt-1">{inc.affected_host || '—'} / {inc.affected_user || '—'}</p></div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-800 pt-4">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 text-xs uppercase">Assigned to</span>
+            <select className="input !w-52 !py-1 text-xs" value={inc.assigned_to || ''} onChange={(e) => patch({ assigned_to: e.target.value })}>
+              <option value="">— unassigned —</option>
+              {['analyst', 'soc_lead', 'security_engineer', 'admin', 'responder'].map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          {inc.status === 'NEW' ? (
+            <a href="/approvals" className="ml-auto text-xs text-accent hover:underline">Approval Center →</a>
+          ) : null}
         </div>
 
         {inc.ai_explanation ? (

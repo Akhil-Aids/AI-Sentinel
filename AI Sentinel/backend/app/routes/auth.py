@@ -10,10 +10,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app import db
+from app.core import mfa as mfa_core
+from app.core.config import settings
 from app.core.deps import client_ip, current_user, require_privilege_at_least
-from app.core.security import (ROLES, hash_password, issue_token, verify_password)
+from app.core.security import (ROLES, decode_token, hash_password, issue_token, verify_password)
 
 router = APIRouter()
+
+MFA_PARTIAL_TTL = 300  # seconds
+MFA_METHOD = "totp"
 
 
 class LoginRequest(BaseModel):
@@ -38,6 +43,25 @@ class UserUpdateRequest(BaseModel):
     full_name: str | None = None
     is_active: bool | None = None
     password: str | None = None
+    mfa_enabled: bool | None = None
+
+
+class MfaVerifyLoginRequest(BaseModel):
+    partial_token: str = Field(min_length=1)
+    otp: str = Field(min_length=6, max_length=6)
+
+
+class MfaPasswordRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+class MfaOtpRequest(BaseModel):
+    otp: str = Field(min_length=6, max_length=6)
+
+
+class MfaDisableRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+    otp: str = Field(min_length=6, max_length=6)
 
 
 def _rate_limit_failed(client: str) -> None:
@@ -68,6 +92,19 @@ def login(payload: LoginRequest, request: Request) -> dict:
                      detail={"reason": "account disabled"})
         raise HTTPException(status_code=403, detail="Account disabled")
     db.update_user(user["id"], last_login_at=db._now())
+    if user.get("mfa_enabled"):
+        db.log_audit(actor=user["username"], role=user["role"], action="auth.login", result="MFA_PENDING",
+                     ip=ip, detail={"reason": "second factor required"})
+        partial = issue_token(user["username"], user["role"], ttl_seconds=MFA_PARTIAL_TTL,
+                              extra={"mfa_pending": True})
+        return {
+            "mfa_required": True,
+            "method": MFA_METHOD,
+            "partial_token": partial,
+            "username": user["username"],
+            "expires_in": settings_token_ttl(),
+            "detail": "Second factor required",
+        }
     token = issue_token(user["username"], user["role"])
     db.log_audit(actor=user["username"], role=user["role"], action="auth.login", result="SUCCESS", ip=ip)
     return {
@@ -81,6 +118,108 @@ def login(payload: LoginRequest, request: Request) -> dict:
 def settings_token_ttl():
     from app.core.config import settings
     return settings.TOKEN_TTL_SECONDS
+
+
+@router.post("/mfa/verify-login")
+def mfa_verify_login(body: MfaVerifyLoginRequest, request: Request) -> dict:
+    ip = client_ip(request)
+    _rate_limit_failed(ip)
+    try:
+        payload = decode_token(body.partial_token)
+    except HTTPException:
+        db.log_audit(actor="unknown", action="auth.mfa_verify", result="FAILED", ip=ip,
+                     detail={"reason": "invalid partial token"})
+        raise HTTPException(status_code=401, detail="Invalid partial token")
+    if not payload.get("mfa_pending"):
+        raise HTTPException(status_code=401, detail="Partial token issued outside MFA flow")
+    user = db.get_user_by_username(payload["sub"])
+    if not user or not user.get("mfa_enabled") or not user.get("mfa_secret"):
+        raise HTTPException(status_code=401, detail="MFA not configured")
+    if not mfa_core.verify_totp(user["mfa_secret"], body.otp):
+        db.log_audit(actor=user["username"], role=user["role"], action="auth.mfa_verify", result="FAILED",
+                     ip=ip, detail={"reason": "invalid code"})
+        raise HTTPException(status_code=401, detail="Invalid verification code")
+    token = issue_token(user["username"], user["role"])
+    db.log_audit(actor=user["username"], role=user["role"], action="auth.mfa_verify", result="SUCCESS", ip=ip)
+    db.log_audit(actor=user["username"], role=user["role"], action="auth.login", result="SUCCESS", ip=ip,
+                 detail={"mfa": True})
+    return {
+        "token": token,
+        "role": user["role"],
+        "username": user["username"],
+        "expires_in": settings_token_ttl(),
+    }
+
+
+@router.get("/mfa/status")
+def mfa_status(payload: dict = Depends(current_user)) -> dict:
+    user = db.get_user_by_username(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "enabled": bool(user.get("mfa_enabled")),
+        "method": MFA_METHOD if user.get("mfa_enabled") else None,
+    }
+
+
+@router.post("/mfa/enroll")
+def mfa_enroll(body: MfaPasswordRequest, request: Request,
+               payload: dict = Depends(current_user)) -> dict:
+    ip = client_ip(request)
+    user = db.get_user_by_username(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Password is incorrect")
+    if user.get("mfa_enabled"):
+        raise HTTPException(status_code=409, detail="MFA is already enabled")
+    secret = mfa_core.generate_secret()
+    db.update_user(user["id"], mfa_secret=secret)
+    db.log_audit(actor=user["username"], role=user["role"], action="auth.mfa_enroll",
+                 result="PENDING", ip=ip, detail={"status": "secret issued"})
+    return {"secret": secret, "otpauth_uri": mfa_core.provisioning_uri(user["username"], secret)}
+
+
+@router.post("/mfa/confirm")
+def mfa_confirm(body: MfaOtpRequest, request: Request,
+                payload: dict = Depends(current_user)) -> dict:
+    ip = client_ip(request)
+    user = db.get_user_by_username(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.get("mfa_secret"):
+        raise HTTPException(status_code=400, detail="No pending MFA enrollment")
+    if user.get("mfa_enabled"):
+        raise HTTPException(status_code=409, detail="MFA is already enabled")
+    if not mfa_core.verify_totp(user["mfa_secret"], body.otp):
+        db.log_audit(actor=user["username"], role=user["role"], action="auth.mfa_confirm",
+                     result="FAILED", ip=ip, detail={"reason": "invalid code"})
+        raise HTTPException(status_code=401, detail="Invalid verification code")
+    db.update_user(user["id"], mfa_enabled=1, mfa_confirmed_at=db._now())
+    db.log_audit(actor=user["username"], role=user["role"], action="auth.mfa_confirm",
+                 result="SUCCESS", ip=ip)
+    return {"status": "ok", "enabled": True, "method": MFA_METHOD}
+
+
+@router.post("/mfa/disable")
+def mfa_disable(body: MfaDisableRequest, request: Request,
+                payload: dict = Depends(current_user)) -> dict:
+    ip = client_ip(request)
+    user = db.get_user_by_username(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.get("mfa_enabled") or not user.get("mfa_secret"):
+        raise HTTPException(status_code=400, detail="MFA is not enabled")
+    if not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Password is incorrect")
+    if not mfa_core.verify_totp(user["mfa_secret"], body.otp):
+        db.log_audit(actor=user["username"], role=user["role"], action="auth.mfa_disable",
+                     result="FAILED", ip=ip, detail={"reason": "invalid code"})
+        raise HTTPException(status_code=401, detail="Invalid verification code")
+    db.update_user(user["id"], mfa_enabled=0, mfa_secret="", mfa_confirmed_at=None)
+    db.log_audit(actor=user["username"], role=user["role"], action="auth.mfa_disable",
+                 result="SUCCESS", ip=ip)
+    return {"status": "ok", "enabled": False}
 
 
 @router.get("/me")
@@ -137,6 +276,10 @@ def update_user(user_id: int, body: UserUpdateRequest, request: Request,
         fields["full_name"] = body.full_name
     if body.is_active is not None:
         fields["is_active"] = int(body.is_active)
+    if body.mfa_enabled is not None:
+        fields["mfa_enabled"] = int(body.mfa_enabled)
+        if body.mfa_enabled is False:
+            fields["mfa_secret"] = ""
     if body.password:
         fields["password_hash"] = hash_password(body.password)
     db.update_user(user_id, **fields)
