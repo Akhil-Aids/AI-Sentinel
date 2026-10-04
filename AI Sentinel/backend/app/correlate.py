@@ -137,7 +137,7 @@ class Correlator:
             # Prefer matching family, otherwise reuse if categories are related.
             if _family_for(inc["category"]) == _family_for(category):
                 return inc
-            related = {_family_for(c), _family_for(inc["category"])}
+            related = {_family_for(category), _family_for(inc["category"])}
             if "exfiltration" in related or "ransomware" in related:
                 return inc
         return None

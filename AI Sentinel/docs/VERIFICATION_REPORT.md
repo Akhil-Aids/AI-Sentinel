@@ -133,6 +133,20 @@ Exact-path conventions; new tables are present in `init_schema` and idempotent.
     record, one API key, several audit entries) in the runtime `data/sentinel.db`
     while exercising the new endpoints.
 
+## H. Defects found and fixed during evaluation (2026-09-14)
+
+Two real defects were discovered while collecting empirical latency/correlation
+numbers for the paper. Both are now fixed and covered by the regression suite.
+
+| ID | Location | Defect | Impact | Fix | Verification |
+|----|----------|--------|--------|-----|--------------|
+| H1 | `backend/app/correlate.py:140` (`Correlator._find_matching`) | `NameError: name 'c' is not defined` — the cross-family correlation branch referenced an undefined name instead of the incoming `category`. | Every malware / suspicious-executable detection whose category differed from an open incident raised `NameError` inside the pipeline worker. The event was dropped from correlation (no incident/alert), and 2,206 `pipeline.process_error` audit rows were produced. Cross-family merge (e.g. malware→exfiltration) was dead code. | Use the incoming detection `category`. | Repro harness: `file.created` now processes without error; live ingest of 6 suspicious-executable events yields `errored=0`, a `high` alert, and a correlated `malware` incident. Cross-family merge now yields `category=malware;exfiltration`. |
+| H2 | `backend/app/db.py::update_incident` | `allowed` column allow-list omitted `timeline`, `mitre`, `risk_score`, `category`, `event_ids`, `confidence`, `title`, `affected_*`, `source_ip`, `dest_ip`, `detection_rules`. | Correlation merges silently dropped timeline growth, MITRE union, risk escalation, category union, and event-id accumulation — incidents never accumulated their real evidence timeline after creation. | Extended the allow-list. | Repro harness: a merged incident now shows `mitre=['T1204','T1059','T1041']` and `timeline=2` entries (was 1) after a malware+exfiltration merge. Full suite: 170 passed. |
+
+Both fixes are in the committed history. The `errored` counter in the Data
+Quality center, which surfaced H1 in production, is the intended detection
+mechanism for silent pipeline drops.
+
 ---
 
 ## Honest blockers / known limitations

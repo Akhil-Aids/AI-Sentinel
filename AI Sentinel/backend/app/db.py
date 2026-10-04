@@ -1404,8 +1404,13 @@ def list_incidents(limit: int = 100, status: Optional[str] = None, severity: Opt
 
 
 def update_incident(incident_id: str, **fields) -> None:
+    # Correlation merges accumulate these denormalized columns on an existing
+    # incident; omitting them silently drops timeline/MITRE/risk escalations.
     allowed = {"status", "severity", "analyst_notes", "recovery_status", "assigned_to",
-               "recommended_actions", "actions_taken", "evidence", "ai_explanation"}
+               "recommended_actions", "actions_taken", "evidence", "ai_explanation",
+               "title", "risk_score", "confidence", "category", "affected_host",
+               "affected_user", "source_ip", "dest_ip", "timeline", "event_ids",
+               "mitre", "detection_rules"}
     sets, params = [], []
     for k, v in fields.items():
         if k in allowed:
