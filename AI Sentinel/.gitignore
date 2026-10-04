@@ -43,3 +43,11 @@ Thumbs.db
 
 # Docker runtime
 _archive/
+
+# --- IEEE paper build artifacts (docs/paper) ---
+docs/paper/*.aux
+docs/paper/*.log
+docs/paper/*.out
+docs/paper/*.xdv
+docs/paper/*.toc
+docs/paper/png/

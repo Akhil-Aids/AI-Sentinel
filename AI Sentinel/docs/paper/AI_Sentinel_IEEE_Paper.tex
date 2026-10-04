@@ -1,4 +1,4 @@
-%=======================================================================
+﻿%=======================================================================
 % AI Sentinel: Evidence-Grounded Real-Time SOC Platform
 % IEEE conference paper base template.
 %
@@ -230,44 +230,45 @@ non-repudiation, and one that a compromised database process can defeat.
 % --------------------------------------------------------------------- %
 \section{System Architecture}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\begin{minipage}{0.94\textwidth}
+\begin{minipage}{0.99\textwidth}
 \centering
 \small
 \begin{tabular}{@{}c@{}}
-\fbox{\parbox{0.90\textwidth}{\centering
+\fbox{\parbox{0.84\textwidth}{\centering
 \textbf{Telemetry Sources} --- endpoint agent (psutil) $\bullet$ host collector $\bullet$ REST shippers}}\\[3pt]
-$\downarrow$ \quad HTTP \texttt{/api/events/ingest}, \texttt{/ingest/agent} (bearer \textbar{} \texttt{X-Agent-Key} \textbar{} \texttt{X-API-Key})\\[3pt]
-\fbox{\parbox{0.90\textwidth}{\centering
+$\downarrow$ \quad HTTP \texttt{/api/events/ingest}, \texttt{/ingest/agent}\\[3pt]
+\fbox{\parbox{0.84\textwidth}{\centering
 \textbf{Ingestion} --- schema normalization (UTC coercion), \texttt{event\_id} dedup, provenance stamping}}\\[3pt]
 $\downarrow$ \quad \textit{non-blocking} \texttt{put\_nowait}\\ \hline
-\fbox{\parbox{0.90\textwidth}{\centering
+\fbox{\parbox{0.84\textwidth}{\centering
 \textbf{Queue} --- \texttt{asyncio.Queue} ($N{=}2$ workers, bounded $M{=}20{,}000$; overflow audited, not blocking)}}\\ \hline
-\fbox{\parbox{0.90\textwidth}{\centering
-\textbf{Detection} --- 17 sliding-window rules $\oplus$ structural web analyzers $\oplus$ Isolation Forest}}
-\quad $\oplus$ \textbf{IOC matching} \hfill $\oplus$ \textbf{Risk engine} $\oplus$ \textbf{TI enrichment}\\[3pt]
+\fbox{\parbox{0.84\textwidth}{\centering
+\textbf{Detection} --- 17 sliding-window rules $\oplus$ structural web analyzers $\oplus$ Isolation Forest}}\\[3pt]
+\quad $\oplus$ \textbf{IOC matching} \qquad $\oplus$ \textbf{Risk engine} $\oplus$ \textbf{TI enrichment}\\[3pt]
 $\downarrow$\\
-\fbox{\parbox{0.90\textwidth}{\centering
+\fbox{\parbox{0.84\textwidth}{\centering
 \textbf{Correlation} --- alert dedup ($g{=}30$\,min) $\rightarrow$ incident merge (6\,h window, progression-aware)}}\\[3pt]
 $\downarrow$ \quad \textit{stage timestamps persisted at every boundary}\\
-\fbox{\parbox{0.90\textwidth}{\centering
+\fbox{\parbox{0.84\textwidth}{\centering
 \textbf{Persistence} --- SQLite (WAL), 40 tables, 62 indexes; \textbf{audit ledger} hash-chained}}\\[3pt]
 $\downarrow$\\
-\fbox{\parbox{0.90\textwidth}{\centering
-\textbf{Delivery} --- authenticated WebSocket (\texttt{Sec-WebSocket-Protocol}); \textbf{Rest} (70+ routes)}}\\[3pt]
+\fbox{\parbox{0.84\textwidth}{\centering
+\textbf{Delivery} --- authenticated WebSocket (\texttt{Sec-WebSocket-Protocol}); \textbf{REST} (70+ routes)}}\\[3pt]
 $\downarrow$\\
-\fbox{\parbox{0.90\textwidth}{\centering
+\fbox{\parbox{0.84\textwidth}{\centering
 \textbf{Operator Console} --- live feed $\bullet$ incidents $\bullet$ cases/evidence/tasks $\bullet$
 SLA $\bullet$ MITRE coverage $\bullet$ posture $\bullet$ data quality}}
-\end{tabular}}
+\end{tabular}
 \end{minipage}
-\caption{System data path. Every stage boundary persists a timestamp, which is
+\caption{System data path. Ingest endpoints authenticate with \texttt{X-Agent-Key}
+(bearer) or \texttt{X-API-Key}. Every stage boundary persists a timestamp, which is
 what makes the latency and detection metrics of Section~VII measurements
 rather than assertions. The four right-hand analytical engines (SLA, MITRE,
 posture, data quality) read only from persisted state.}
 \label{fig:arch}
-\end{figure}
+\end{figure*}
 
 \subsection{Design Invariant}
 
@@ -354,9 +355,12 @@ store over a configurable window. For example, brute-force velocity fires
 when
 
 \begin{equation}
-\text{count}(\texttt{auth.failed\_login}, W, \texttt{source\_ip} = s) \geq F
-\;\;\land\;\;
-\left|\text{distinct}(\texttt{auth.failed\_login}, W, \texttt{username}, \texttt{source\_ip} = s)\right| \geq U
+\footnotesize
+\begin{aligned}
+&\text{count}(\texttt{auth.failed\_login}, W, \texttt{source\_ip}{=}s) \geq F \\
+&\quad \land\;\; \bigl|\text{distinct}(\texttt{auth.failed\_login}, W,
+  \texttt{username}, \texttt{source\_ip}{=}s)\bigr| \geq U
+\end{aligned}
 \end{equation}
 
 \noindent for window $W$, failure threshold $F$, and unique-account
@@ -381,9 +385,12 @@ telemetry samples rather than on a live snapshot, over seven normalized
 features:
 
 \begin{equation}
-\mathbf{f} = \left[\,\text{throughput},\; \Delta\text{conn},\;
-|\text{suspicious ports}|,\; \text{active conn},\; \text{cpu},\;
-\text{mem},\; \text{disk}\,\right]
+\footnotesize
+\begin{aligned}
+\mathbf{f} = \bigl[\,&amp;\text{throughput},\; \Delta\text{conn},\;
+|\text{suspicious ports}|,\; \text{active conn},\\
+             &amp;\text{cpu},\; \text{mem},\; \text{disk}\,\bigr]
+\end{aligned}
 \end{equation}
 
 \noindent scaled by a persisted \texttt{StandardScaler}. Training is
@@ -439,7 +446,7 @@ described there, unreachable in practice due to a defect.
 Event risk combines severity, confidence, and asset criticality:
 
 \begin{equation}
-R_e = \min\!\left(100,\;\Bigl[0.25\,w_{\text{sev}} + 0.30\,(100 c) + 0.20\,w_{\text{asset}}\Bigr] \cdot b + \text{TI}\Bigr)
+R_e = \min\!\Bigl(100,\;\bigl[0.25\,w_{\text{sev}} + 0.30\,(100 c) + 0.20\,w_{\text{asset}}\bigr] \cdot b + \text{TI}\Bigr)
 \end{equation}
 
 \noindent where $w_{\text{sev}} \in \{0,10,25,45,70\}$, $c \in [0,1]$ is
@@ -448,9 +455,11 @@ multiplicative bumps for high severity and high confidence. Incident risk
 aggregates constituent event risks by bounded noisy-OR, in the spirit of
 ensembling bounded evidence sources rather than simple averaging \cite{breiman2001random},
 
-\begin{equation}
-R_i = \Bigl[\,\Bigl(1 - \prod_{j}\bigl(1 - \hat{r}_j\bigr)\Bigr) \cdot (0.7 + 0.3 \underbrace{\min(1, \tfrac{\log_{10}(n{+}1)}{2})}_{\text{count}}) \cdot (0.75 + 0.25 p)\,\Bigr] + \min(\text{TI}, 25)
-\end{equation}
+\begin{align}
+R_i &= \Bigl[\,\Bigl(1 - \prod_{j}\bigl(1 - \hat{r}_j\bigr)\Bigr) \cdot
+       \Bigl(0.7 + 0.3 \underbrace{\min(1, \tfrac{\log_{10}(n{+}1)}{2})}_{\text{count}}\Bigr) \\
+&\qquad \cdot (0.75 + 0.25 p)\,\Bigr] + \min(\text{TI}, 25)
+\end{align}
 
 \noindent clipped to $[0,100]$, where $p$ is kill-chain progression and $\hat{r}_j$ are normalized event risks. The function is deterministic and contains no stochastic component, so a risk score is reproducible from the incident record alone -- a property we require precisely so that scores can be audited. Risk is additionally floored by severity, preventing a high-confidence low-base event from under-reporting.
 
@@ -467,7 +476,8 @@ Each record commits to its predecessor:
 
 \begin{align}
 h_i &= \text{HMAC}\text{-}\text{SHA256}\!\left(K,\; h_{i-1} \,\|\, \text{canonical}(r_i)\right) \\
-\text{canonical}(r) &= \text{ts} \,\|\, \text{actor} \,\|\, \text{role} \,\|\, \text{action} \,\|\, \text{target} \,\|\, \text{result} \,\|\, \text{ip} \,\|\, \text{detail}
+\text{canonical}(r) &= \text{ts} \,\|\, \text{actor} \,\|\, \text{role} \,\|\, \text{action} \\
+&\quad \|\, \text{target} \,\|\, \text{result} \,\|\, \text{ip} \,\|\, \text{detail}
 \end{align}
 
 \noindent where $h_0 = \varepsilon$ and $K$ is the deployment secret. Because
@@ -495,9 +505,10 @@ list of per-factor deltas that produced it. Each factor is clamped to a
 maximum magnitude before application, which bounds any single factor's
 influence and prevents score oscillation driven by one noisy signal:
 
-\begin{equation}
-S = \operatorname{clamp}\!\left(100 + \sum_{i} \delta_i,\; 0,\; 100\right), \qquad \delta_i = \operatorname{clip}\!\left(\Delta_i,\; -w_i^{+},\; w_i^{+}\right)
-\end{equation}
+\begin{align}
+S &= \operatorname{clamp}\!\left(100 + \sum_{i} \delta_i,\; 0,\; 100\right) \\
+\delta_i &= \operatorname{clip}\!\left(\Delta_i,\; -w_i^{+},\; w_i^{+}\right)
+\end{align}
 
 \noindent The factors and their penalty headroom are: telemetry volume (40),
 rule health (30), incident SLA performance (20), evidence coverage (10),
@@ -535,7 +546,9 @@ side (rules and their technique tags, partitioned by enabled state) and the
 incidents). Each technique receives one of four statuses:
 
 \begin{center}
-\begin{tabular}{@{}lp{0.62\textwidth}@{}}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{@{}p{0.36\columnwidth}p{0.58\columnwidth}@{}}
 \toprule
 \textbf{Status} & \textbf{Evidence condition} \\
 \midrule
@@ -727,7 +740,7 @@ follow.
 \label{tab:latency}
 \centering
 \footnotesize
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}p{0.42\columnwidth}rrrr@{}}
 \toprule
 \textbf{Stage} & $n$ & $p_{50}$ & $p_{95}$ & $p_{99}$ \\
 \midrule
@@ -739,8 +752,8 @@ follow.
 \texttt{alert\_created\_at} $\rightarrow$ \texttt{incident\_created\_at} & 11 & 0.10 & 2.59 & 3.11 \\
 \texttt{incident\_created\_at} $\rightarrow$ \texttt{dashboard\_delivered\_at} & 11 & 0.02 & 0.26 & 0.43 \\
 \midrule
-\multicolumn{5}{@{}l}{\footnotesize $^\dagger$ origin delay: agent batching and clock offset,}\\
-\multicolumn{5}{@{}l}{\footnotesize \phantom{$^\dagger$}\hspace{1.1em}excluded from platform claims.}\\
+\multicolumn{5}{@{}p{\columnwidth}@{}}{\footnotesize $^\dagger$ origin delay: agent batching and clock offset,}\\
+\multicolumn{5}{@{}p{\columnwidth}@{}}{\footnotesize \phantom{$^\dagger$}\hspace{1.1em}excluded from platform claims.}\\
 \bottomrule
 \end{tabular}
 \end{table}
